@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lucero.backend.dto.ProgramadorPublicoDTO;
 import com.lucero.backend.models.Programador;
 import com.lucero.backend.models.Usuario;
+import com.lucero.backend.repositories.AsesoriaRepository; // ✅ IMPORTANTE
 import com.lucero.backend.repositories.ProgramadorRepository;
 import com.lucero.backend.repositories.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,11 +14,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.Collections;
-import java.util.HashMap; // ✅ Import necesario
-import java.util.List;
-import java.util.Map; // ✅ Import necesario
-import java.util.UUID;
+import java.time.LocalDate; // ✅ IMPORTANTE
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/programadores")
@@ -29,6 +28,9 @@ public class ProgramadorController {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Autowired
+    private AsesoriaRepository asesoriaRepository; // ✅ Necesario para ver qué horas están ocupadas
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -46,6 +48,58 @@ public class ProgramadorController {
         return convertirADTO(p);
     }
 
+    // ✅ NUEVO ENDPOINT CRÍTICO: Calcular Slots Libres por Fecha
+    // El frontend llama a esto cuando seleccionas una fecha en el calendario
+    @GetMapping("/{id}/slots")
+    public ResponseEntity<List<String>> obtenerSlotsDisponibles(
+            @PathVariable UUID id,
+            @RequestParam("fecha") String fechaStr // YYYY-MM-DD
+    ) {
+        try {
+            // 1. Buscar al programador
+            Programador p = programadorRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Programador no encontrado"));
+
+            // 2. Obtener sus horas base (ej: ["09:00", "10:00", "11:00"])
+            List<String> horasConfiguradas = p.getHorasDisponibles();
+            if (horasConfiguradas == null || horasConfiguradas.isEmpty()) {
+                return ResponseEntity.ok(Collections.emptyList());
+            }
+
+            // 3. Obtener las citas que YA tiene agendadas ese día
+            LocalDate fecha = LocalDate.parse(fechaStr);
+            var citasAgendadas = asesoriaRepository.findByProgramadorIdAndFecha(id, fecha);
+
+            // 4. Sacar la lista de horas ocupadas (cortando los segundos si vienen
+            // 09:00:00)
+            List<String> horasOcupadas = citasAgendadas.stream()
+                    .map(cita -> {
+                        String h = cita.getHora().toString();
+                        return h.length() > 5 ? h.substring(0, 5) : h;
+                    })
+                    .collect(Collectors.toList());
+
+            // 5. RESTAR: Disponibles = Configuradas - Ocupadas
+            List<String> slotsLibres = new ArrayList<>();
+            for (String hora : horasConfiguradas) {
+                // Aseguramos formato HH:mm
+                String horaSimple = hora.length() > 5 ? hora.substring(0, 5) : hora;
+
+                if (!horasOcupadas.contains(horaSimple)) {
+                    slotsLibres.add(horaSimple);
+                }
+            }
+
+            Collections.sort(slotsLibres); // Ordenar para que salgan bonitas (09:00, 10:00...)
+
+            return ResponseEntity.ok(slotsLibres);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
     // --- CREAR (POST) ---
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> crearProgramador(
@@ -61,7 +115,7 @@ public class ProgramadorController {
             @RequestParam(value = "disponibilidad", required = false) String disponibilidad,
             @RequestParam(value = "horasDisponibles", required = false) String horasJson) {
         try {
-            // 1. VALIDACIÓN
+            // Validación Email
             String emailReal = (emailContacto != null && !emailContacto.isBlank())
                     ? emailContacto
                     : "temp_" + UUID.randomUUID() + "@sistema.com";
@@ -70,13 +124,13 @@ public class ProgramadorController {
                 return ResponseEntity.badRequest().body("Error: El email " + emailReal + " ya está registrado.");
             }
 
-            // 2. FOTO
+            // Foto
             String urlFoto = null;
             if (file != null && !file.isEmpty()) {
                 urlFoto = "https://ui-avatars.com/api/?name=" + nombre.replace(" ", "+");
             }
 
-            // 3. USUARIO
+            // Usuario
             Usuario usuario = new Usuario();
             usuario.setNombre(nombre);
             usuario.setEmail(emailReal);
@@ -84,10 +138,9 @@ public class ProgramadorController {
             usuario.setRol("programador");
             usuario.setActivo(true);
             usuario.setFotoUrl(urlFoto);
-
             usuario = usuarioRepository.save(usuario);
 
-            // 4. PROGRAMADOR
+            // Programador
             Programador p = new Programador();
             p.setUsuario(usuario);
             p.setEspecialidad(especialidad);
@@ -166,32 +219,27 @@ public class ProgramadorController {
         }
     }
 
-    // --- ✅ ELIMINAR (DELETE) CORREGIDO ---
+    // --- ELIMINAR (DELETE) ---
     @DeleteMapping("/{id}")
     public ResponseEntity<?> eliminarProgramador(@PathVariable UUID id) {
         try {
-            // 1. Buscar
             Programador p = programadorRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("No existe el programador"));
 
             Usuario u = p.getUsuario();
 
-            // 2. Borrar (La BD con CASCADE se encarga de los hijos)
+            // La BD con CASCADE se encarga de los hijos
             programadorRepository.delete(p);
 
-            // 3. Borrar Usuario
             if (u != null) {
                 usuarioRepository.delete(u);
             }
 
-            // ✅ CORRECCIÓN CRÍTICA: Devolver JSON, no String plano
             Map<String, String> response = new HashMap<>();
             response.put("mensaje", "Programador eliminado correctamente");
-
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            // Si hay error, también devolvemos JSON para ser consistentes
             Map<String, String> errorResponse = new HashMap<>();
             errorResponse.put("error", "Error al eliminar: " + e.getMessage());
             return ResponseEntity.badRequest().body(errorResponse);
