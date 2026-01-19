@@ -21,7 +21,6 @@ public class Asesoria {
 
     @ManyToOne
     @JoinColumn(name = "programador_id", nullable = false)
-    // 👇 ESTA LÍNEA ES VITAL PARA EVITAR EL ERROR DE "BUCLE INFINITO"
     @JsonIgnoreProperties({ "asesorias", "usuario", "password", "rol" })
     private Programador programador;
 
