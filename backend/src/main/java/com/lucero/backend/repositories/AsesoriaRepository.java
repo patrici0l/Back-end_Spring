@@ -14,10 +14,6 @@ import java.util.Map;
 
 public interface AsesoriaRepository extends JpaRepository<Asesoria, UUID> {
 
-        // =========================
-        // MÉTODOS ESTÁNDAR
-        // =========================
-
         List<Asesoria> findByProgramadorId(UUID programadorId);
 
         // Para saber horas ocupadas en una fecha
