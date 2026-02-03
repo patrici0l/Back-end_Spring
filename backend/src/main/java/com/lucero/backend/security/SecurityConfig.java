@@ -28,20 +28,20 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
-                // ✅ HABILITA CORS GLOBAL USANDO LA CONFIGURACIÓN DEFINIDA ABAJO
+
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
-                        // 🔓 ENDPOINTS PÚBLICOS (Solo Auth y lo que sea explícitamente público)
+                        // ENDPOINTS PÚBLICOS (Solo Auth y lo que sea explícitamente público)
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // ✅ público para agendar
+                        // público para agendar
                         .requestMatchers("/api/disponibilidades/**").permitAll()
 
-                        // ✅ Endpoints de asesorías públicas
+                        // Endpoints de asesorías públicas
                         .requestMatchers("/api/asesorias/publica").permitAll()
                         .requestMatchers("/api/asesorias/ocupadas/**").permitAll()
 
-                        // 🔒 TODO LO DEMÁS REQUIERE AUTENTICACIÓN
+                        // TODO LO DEMÁS REQUIERE AUTENTICACIÓN
                         // Aquí caen automáticamente:
                         // - /api/programadores/**
                         // - /api/proyectos/programador/**
@@ -58,7 +58,7 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // ✅ CORS para permitir peticiones desde Angular
+    //  CORS para permitir peticiones desde Angular
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
