@@ -11,8 +11,9 @@ import java.util.UUID;
 public class Usuario {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
-    private UUID id;
+@Column(columnDefinition = "uuid")
+private UUID id;
+
 
     @Column(name = "firebase_uid", unique = true)
     private String firebaseUid;

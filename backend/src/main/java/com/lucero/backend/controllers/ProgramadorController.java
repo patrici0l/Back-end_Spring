@@ -5,16 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lucero.backend.dto.ProgramadorPublicoDTO;
 import com.lucero.backend.models.Programador;
 import com.lucero.backend.models.Usuario;
-import com.lucero.backend.repositories.AsesoriaRepository; // ✅ IMPORTANTE
+import com.lucero.backend.repositories.AsesoriaRepository;
 import com.lucero.backend.repositories.ProgramadorRepository;
 import com.lucero.backend.repositories.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder; // ✅ IMPORT NECESARIO
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDate; // ✅ IMPORTANTE
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -30,10 +31,13 @@ public class ProgramadorController {
     private UsuarioRepository usuarioRepository;
 
     @Autowired
-    private AsesoriaRepository asesoriaRepository; // ✅ Necesario para ver qué horas están ocupadas
+    private AsesoriaRepository asesoriaRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder; // ✅ INYECCIÓN DE DEPENDENCIA
 
     // --- GET METHODS ---
     @GetMapping
@@ -48,8 +52,7 @@ public class ProgramadorController {
         return convertirADTO(p);
     }
 
-    // ✅ NUEVO ENDPOINT CRÍTICO: Calcular Slots Libres por Fecha
-    // El frontend llama a esto cuando seleccionas una fecha en el calendario
+    // ✅ Calcular Slots Libres por Fecha
     @GetMapping("/{id}/slots")
     public ResponseEntity<List<String>> obtenerSlotsDisponibles(
             @PathVariable UUID id,
@@ -134,7 +137,10 @@ public class ProgramadorController {
             Usuario usuario = new Usuario();
             usuario.setNombre(nombre);
             usuario.setEmail(emailReal);
-            usuario.setPasswordHash("123456");
+
+            // ✅ APLICANDO EL FIX DE PASSWORD ENCODER AQUÍ
+            usuario.setPasswordHash(passwordEncoder.encode("123456"));
+
             usuario.setRol("programador");
             usuario.setActivo(true);
             usuario.setFotoUrl(urlFoto);
