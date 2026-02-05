@@ -80,7 +80,7 @@ public class AsesoriaProgramadorController {
         asesoria.setEstado(estado);
         asesoria.setRespuestaProgramador(respuesta);
         Asesoria guardada = asesoriaRepository.save(asesoria);
-        System.out.println("✅ BD Actualizada. Estado: " + estado);
+        System.out.println(" BD Actualizada. Estado: " + estado);
 
         // 2. Lógica de Correo Electrónico
         if (estado != null && (estado.equals("aprobada") || estado.equals("rechazada"))) {
@@ -94,7 +94,7 @@ public class AsesoriaProgramadorController {
                     // Definir Asunto
                     String asunto = estado.equals("aprobada") ? "✅ Asesoría Aprobada" : "❌ Asesoría Rechazada";
 
-                    // ✅ FIX: Construir mensaje con fallback si 'respuesta' es null o vacía
+                    //  FIX: Construir mensaje con fallback si 'respuesta' es null o vacía
                     String mensaje = (respuesta != null && !respuesta.isBlank())
                             ? respuesta
                             : "Hola, tu solicitud de asesoría para el día " + guardada.getFecha()

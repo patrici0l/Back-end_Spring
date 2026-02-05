@@ -47,6 +47,8 @@ public class AsesoriaController {
                 .orElseThrow(() -> new RuntimeException("No tienes perfil de programador"));
     }
 
+    // --- ENDPOINTS PÚBLICOS ---
+
     @PostMapping("/publica")
     public ResponseEntity<?> crearPublica(@RequestBody Map<String, Object> body) {
         try {
@@ -59,20 +61,20 @@ public class AsesoriaController {
             a.setProgramador(prog);
             a.setNombreSolicitante((String) body.get("nombreSolicitante"));
 
-            // 2. OBTENER EMAIL
+            // 2. Email y Teléfono (Vinculación automática)
             String email = (String) body.get("emailSolicitante");
             a.setEmailSolicitante(email);
 
-            // =================================================================
-            // 🔥 MAGIA AQUÍ: VINCULACIÓN AUTOMÁTICA
-            // Buscamos si ya existe un usuario con ese email y lo conectamos.
-            // Así aparecerá en "Mis Asesorías" inmediatamente.
-            // =================================================================
-            usuarioRepository.findByEmail(email).ifPresent(usuarioEncontrado -> {
-                a.setUsuario(usuarioEncontrado);
-            });
+            // ✅ Captura de teléfono (Nueva funcionalidad)
+            String telefono = body.get("telefonoSolicitante") != null
+                    ? body.get("telefonoSolicitante").toString()
+                    : null;
+            a.setTelefonoSolicitante(telefono);
 
-            // 3. Resto de datos
+            // Vinculación con usuario existente si el email coincide
+            usuarioRepository.findByEmail(email).ifPresent(a::setUsuario);
+
+            // 3. Datos de la cita
             a.setComentario((String) body.getOrDefault("comentario", ""));
             a.setFecha(LocalDate.parse((String) body.get("fecha")));
             a.setHora(LocalTime.parse((String) body.get("hora")));
@@ -84,17 +86,13 @@ public class AsesoriaController {
         }
     }
 
-    /**
-     * Requerido por el componente de Angular para marcar horas como ocupadas
-     */
     @GetMapping("/ocupadas/{idProgramador}/{fecha}")
     public List<Asesoria> getOcupadas(@PathVariable UUID idProgramador, @PathVariable String fecha) {
         LocalDate ld = LocalDate.parse(fecha);
-        // Retorna asesorías que no estén rechazadas para esa fecha
         return asesoriaRepository.findByProgramadorIdAndFechaAndEstadoNot(idProgramador, ld, "rechazada");
     }
 
-    // --- ENDPOINTS PRIVADOS ---
+    // --- ENDPOINTS PRIVADOS (GESTIÓN) ---
 
     @GetMapping("/programador")
     public List<Asesoria> asesoriasDelProgramador() {
@@ -116,25 +114,22 @@ public class AsesoriaController {
 
         Programador programadorActual = obtenerProgramadorActual();
 
-        // 1. Validación de Propiedad
+        // Validaciones de seguridad y lógica de negocio
         if (!asesoria.getProgramador().getId().equals(programadorActual.getId())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("No autorizado");
         }
 
-        // 2. ✅ NUEVA VALIDACIÓN: Si ya no es pendiente, no se toca.
         if (!asesoria.getEstado().equalsIgnoreCase("pendiente")) {
             return ResponseEntity.badRequest()
                     .body("Esta asesoría ya fue procesada (" + asesoria.getEstado() + ") y no puede modificarse.");
         }
 
-        // 3. ✅ NUEVA VALIDACIÓN: Bloqueo de fechas pasadas
         if (asesoria.getFecha().isBefore(LocalDate.now())) {
             return ResponseEntity.badRequest()
                     .body("No se puede gestionar una asesoría de una fecha pasada.");
         }
 
-        // --- INICIO DE ACTUALIZACIÓN ---
-
+        // Actualización de campos
         String estadoRaw = (String) body.get("estado");
         String estado = (estadoRaw != null) ? estadoRaw.toLowerCase().trim() : null;
         String respuesta = (String) body.get("respuestaProgramador");
@@ -146,35 +141,32 @@ public class AsesoriaController {
 
         Asesoria guardada = asesoriaRepository.save(asesoria);
 
-        // --- ENVÍO DE EMAIL ---
+        // Envío de Email de notificación
         if (estado != null && (estado.equals("aprobada") || estado.equals("rechazada"))) {
-
             if (guardada.getEmailSolicitante() == null || guardada.getEmailSolicitante().isBlank()) {
                 return ResponseEntity.ok(Map.of(
                         "asesoria", guardada,
-                        "warning", "Estado actualizado, pero la asesoría no tiene un email de contacto."));
+                        "warning", "Estado actualizado, pero no hay email de contacto."));
             }
 
             try {
                 String asunto = estado.equals("aprobada") ? "✅ Tu asesoría fue aprobada"
                         : "❌ Tu asesoría fue rechazada";
-                String mensaje = (respuesta != null && !respuesta.isBlank())
-                        ? respuesta
+                String mensaje = (respuesta != null && !respuesta.isBlank()) ? respuesta
                         : "Tu asesoría para el día " + guardada.getFecha() + " ha sido: " + estado;
 
                 emailService.enviarCorreo(guardada.getEmailSolicitante(), asunto, mensaje);
             } catch (Exception e) {
                 return ResponseEntity.ok(Map.of(
                         "asesoria", guardada,
-                        "warning", "Estado guardado, pero falló el servidor de correo: " + e.getMessage()));
+                        "warning", "Estado guardado, pero falló el correo: " + e.getMessage()));
             }
         }
 
         return ResponseEntity.ok(guardada);
     }
-    // ... resto de tu código existente ...
 
-    // --- NUEVO ENDPOINT PARA FILTROS ---
+    // --- FILTROS AVANZADOS ---
 
     @GetMapping("/programador/filtradas")
     public ResponseEntity<?> asesoriasFiltradas(
@@ -184,42 +176,32 @@ public class AsesoriaController {
         try {
             Programador p = obtenerProgramadorActual();
 
-            // Caso 1: sin filtros (devuelve todo lo del programador)
+            // Caso 1: Sin filtros
             if (estado == null && desde == null && hasta == null) {
-                return ResponseEntity.ok(
-                        asesoriaRepository.findByProgramadorId(p.getId()));
+                return ResponseEntity.ok(asesoriaRepository.findByProgramadorId(p.getId()));
             }
 
-            // Caso 2: solo estado
+            // Caso 2: Solo estado
             if (estado != null && desde == null && hasta == null) {
-                return ResponseEntity.ok(
-                        asesoriaRepository.findByProgramadorIdAndEstado(p.getId(), estado));
+                return ResponseEntity.ok(asesoriaRepository.findByProgramadorIdAndEstado(p.getId(), estado));
             }
 
-            // Caso 3: rango de fechas (sin importar estado)
+            // Caso 3: Rango de fechas
             if (estado == null && desde != null && hasta != null) {
-                return ResponseEntity.ok(
-                        asesoriaRepository.findByProgramadorIdAndFechaBetween(
-                                p.getId(),
-                                LocalDate.parse(desde),
-                                LocalDate.parse(hasta)));
+                return ResponseEntity.ok(asesoriaRepository.findByProgramadorIdAndFechaBetween(
+                        p.getId(), LocalDate.parse(desde), LocalDate.parse(hasta)));
             }
 
-            // Caso 4: estado + rango de fechas
+            // Caso 4: Estado + Rango de fechas
             if (estado != null && desde != null && hasta != null) {
-                return ResponseEntity.ok(
-                        asesoriaRepository.findByProgramadorIdAndEstadoAndFechaBetween(
-                                p.getId(),
-                                estado,
-                                LocalDate.parse(desde),
-                                LocalDate.parse(hasta)));
+                return ResponseEntity.ok(asesoriaRepository.findByProgramadorIdAndEstadoAndFechaBetween(
+                        p.getId(), estado, LocalDate.parse(desde), LocalDate.parse(hasta)));
             }
 
-            return ResponseEntity.badRequest().body("Combinación de filtros no válida (ej. falta fecha inicio o fin)");
+            return ResponseEntity.badRequest().body("Combinación de filtros no válida.");
 
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error al filtrar: " + e.getMessage());
         }
     }
-
-} // Fin de la clase AsesoriaController
+}
