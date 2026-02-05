@@ -6,7 +6,7 @@ import com.lucero.backend.models.Usuario;
 import com.lucero.backend.repositories.AsesoriaRepository;
 import com.lucero.backend.repositories.ProgramadorRepository;
 import com.lucero.backend.repositories.UsuarioRepository;
-import com.lucero.backend.services.EmailService; // ✅ IMPORTANTE: Importar el servicio
+import com.lucero.backend.services.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,7 +33,7 @@ public class AsesoriaProgramadorController {
     private ProgramadorRepository programadorRepository;
 
     @Autowired
-    private EmailService emailService; // ✅ ESTO FALTABA: Inyección del servicio de Email
+    private EmailService emailService;
 
     // Método auxiliar para obtener el programador logueado
     private Programador obtenerProgramadorActual() {
@@ -54,11 +54,12 @@ public class AsesoriaProgramadorController {
         return asesoriaRepository.findByProgramadorId(p.getId());
     }
 
-    // 2) APROBAR / RECHAZAR + RESPUESTA (CON LOGS DE DEBUG)
+    // 2) APROBAR / RECHAZAR + RESPUESTA (CORREGIDO)
     @PutMapping("/{id}")
     public ResponseEntity<?> actualizarEstado(
             @PathVariable UUID id,
             @RequestBody Map<String, String> body) {
+
         System.out.println("--- INICIO DEBUG ACTUALIZACIÓN ---");
 
         Programador actual = obtenerProgramadorActual();
@@ -75,35 +76,42 @@ public class AsesoriaProgramadorController {
         String estado = body.get("estado");
         String respuesta = body.get("respuestaProgramador");
 
-        // Guardamos en BD
+        // 1. Guardamos en Base de Datos
         asesoria.setEstado(estado);
         asesoria.setRespuestaProgramador(respuesta);
         Asesoria guardada = asesoriaRepository.save(asesoria);
         System.out.println("✅ BD Actualizada. Estado: " + estado);
 
-        // --- LÓGICA DE CORREO CON DEBUG ---
-        System.out.println("🔍 Datos para envío:");
-        System.out.println("   -> Estado nuevo: " + estado);
-        System.out.println("   -> Email destino: " + guardada.getEmailSolicitante());
-
+        // 2. Lógica de Correo Electrónico
         if (estado != null && (estado.equals("aprobada") || estado.equals("rechazada"))) {
 
-            if (guardada.getEmailSolicitante() == null || guardada.getEmailSolicitante().isBlank()) {
+            String emailDestino = guardada.getEmailSolicitante();
+
+            if (emailDestino == null || emailDestino.isBlank()) {
                 System.out.println("⚠️ ALERTA: Email nulo o vacío. Cancelando envío.");
             } else {
-                System.out.println("🚀 Intentando enviar correo SMTP...");
                 try {
+                    // Definir Asunto
                     String asunto = estado.equals("aprobada") ? "✅ Asesoría Aprobada" : "❌ Asesoría Rechazada";
-                    // Enviar correo real
-                    emailService.enviarCorreo(guardada.getEmailSolicitante(), asunto, respuesta);
-                    System.out.println("✨ ÉXITO: Método enviarCorreo ejecutado sin error.");
+
+                    // ✅ FIX: Construir mensaje con fallback si 'respuesta' es null o vacía
+                    String mensaje = (respuesta != null && !respuesta.isBlank())
+                            ? respuesta
+                            : "Hola, tu solicitud de asesoría para el día " + guardada.getFecha()
+                                    + " a las " + guardada.getHora() + " ha sido: " + estado + ".";
+
+                    System.out.println("🚀 Enviando correo a: " + emailDestino);
+
+                    emailService.enviarCorreo(emailDestino, asunto, mensaje);
+
+                    System.out.println("✨ ÉXITO: Correo enviado correctamente.");
                 } catch (Exception e) {
-                    System.err.println("❌ ERROR CRÍTICO enviando correo: " + e.getMessage());
-                    e.printStackTrace();
+                    // Logueamos el error pero no bloqueamos la respuesta al cliente
+                    System.err.println("❌ ERROR enviando correo: " + e.getMessage());
                 }
             }
         } else {
-            System.out.println("ℹ️ No se envía correo (estado no es aprobada/rechazada).");
+            System.out.println("ℹ️ No se requiere envío de correo para el estado: " + estado);
         }
 
         System.out.println("--- FIN DEBUG ---");

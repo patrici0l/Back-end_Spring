@@ -1,6 +1,6 @@
 package com.lucero.backend.models;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties; 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.LocalDate;
@@ -16,6 +16,7 @@ public class Asesoria {
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
+
     @Column(name = "respondido_en")
     private LocalDateTime respondidoEn;
 
@@ -35,6 +36,9 @@ public class Asesoria {
     @Column(name = "email_solicitante")
     private String emailSolicitante;
 
+    @Column(name = "telefono_solicitante")
+    private String telefonoSolicitante;
+
     private LocalDate fecha;
     private LocalTime hora;
     private String comentario;
@@ -49,7 +53,8 @@ public class Asesoria {
     @PrePersist
     protected void onCreate() {
         creadoEn = LocalDateTime.now();
-        if (estado == null)
+        if (estado == null) {
             estado = "pendiente";
+        }
     }
 }
