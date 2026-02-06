@@ -11,7 +11,7 @@ import com.lucero.backend.repositories.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder; // ✅ IMPORT NECESARIO
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -37,12 +37,17 @@ public class ProgramadorController {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private PasswordEncoder passwordEncoder; // ✅ INYECCIÓN DE DEPENDENCIA
+    private PasswordEncoder passwordEncoder;
 
-    // --- GET METHODS ---
+    // -------------------------
+    // GET
+    // -------------------------
     @GetMapping
     public List<ProgramadorPublicoDTO> obtenerTodos() {
-        return programadorRepository.findAll().stream().map(this::convertirADTO).toList();
+        return programadorRepository.findAll()
+                .stream()
+                .map(this::convertirADTO)
+                .toList();
     }
 
     @GetMapping("/{id}")
@@ -52,29 +57,26 @@ public class ProgramadorController {
         return convertirADTO(p);
     }
 
-    // ✅ Calcular Slots Libres por Fecha
+    // -------------------------
+    // Slots por fecha
+    // -------------------------
     @GetMapping("/{id}/slots")
     public ResponseEntity<List<String>> obtenerSlotsDisponibles(
             @PathVariable UUID id,
-            @RequestParam("fecha") String fechaStr // YYYY-MM-DD
+            @RequestParam("fecha") String fechaStr
     ) {
         try {
-            // 1. Buscar al programador
             Programador p = programadorRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("Programador no encontrado"));
 
-            // 2. Obtener sus horas base (ej: ["09:00", "10:00", "11:00"])
             List<String> horasConfiguradas = p.getHorasDisponibles();
             if (horasConfiguradas == null || horasConfiguradas.isEmpty()) {
                 return ResponseEntity.ok(Collections.emptyList());
             }
 
-            // 3. Obtener las citas que YA tiene agendadas ese día
             LocalDate fecha = LocalDate.parse(fechaStr);
             var citasAgendadas = asesoriaRepository.findByProgramadorIdAndFecha(id, fecha);
 
-            // 4. Sacar la lista de horas ocupadas (cortando los segundos si vienen
-            // 09:00:00)
             List<String> horasOcupadas = citasAgendadas.stream()
                     .map(cita -> {
                         String h = cita.getHora().toString();
@@ -82,19 +84,15 @@ public class ProgramadorController {
                     })
                     .collect(Collectors.toList());
 
-            // 5. RESTAR: Disponibles = Configuradas - Ocupadas
             List<String> slotsLibres = new ArrayList<>();
             for (String hora : horasConfiguradas) {
-                // Aseguramos formato HH:mm
                 String horaSimple = hora.length() > 5 ? hora.substring(0, 5) : hora;
-
                 if (!horasOcupadas.contains(horaSimple)) {
                     slotsLibres.add(horaSimple);
                 }
             }
 
-            Collections.sort(slotsLibres); // Ordenar para que salgan bonitas (09:00, 10:00...)
-
+            Collections.sort(slotsLibres);
             return ResponseEntity.ok(slotsLibres);
 
         } catch (Exception e) {
@@ -103,7 +101,9 @@ public class ProgramadorController {
         }
     }
 
-    // --- CREAR (POST) ---
+    // -------------------------
+    // POST (crear)
+    // -------------------------
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> crearProgramador(
             @RequestParam(value = "file", required = false) MultipartFile file,
@@ -116,18 +116,20 @@ public class ProgramadorController {
             @RequestParam(value = "portafolio", required = false) String portafolio,
             @RequestParam(value = "whatsapp", required = false) String whatsapp,
             @RequestParam(value = "disponibilidad", required = false) String disponibilidad,
-            @RequestParam(value = "horasDisponibles", required = false) String horasJson) {
+            @RequestParam(value = "horasDisponibles", required = false) String horasJson
+    ) {
         try {
-            // Validación Email
+            // Email "real" para login (si no mandan email, se crea uno temporal)
             String emailReal = (emailContacto != null && !emailContacto.isBlank())
                     ? emailContacto
                     : "temp_" + UUID.randomUUID() + "@sistema.com";
 
             if (usuarioRepository.findByEmail(emailReal).isPresent()) {
-                return ResponseEntity.badRequest().body("Error: El email " + emailReal + " ya está registrado.");
+                return ResponseEntity.badRequest()
+                        .body("Error: El email " + emailReal + " ya está registrado.");
             }
 
-            // Foto
+            // Foto (OJO: aquí NO guardas el archivo real, solo generas URL)
             String urlFoto = null;
             if (file != null && !file.isEmpty()) {
                 urlFoto = "https://ui-avatars.com/api/?name=" + nombre.replace(" ", "+");
@@ -137,10 +139,7 @@ public class ProgramadorController {
             Usuario usuario = new Usuario();
             usuario.setNombre(nombre);
             usuario.setEmail(emailReal);
-
-            // ✅ APLICANDO EL FIX DE PASSWORD ENCODER AQUÍ
             usuario.setPasswordHash(passwordEncoder.encode("123456"));
-
             usuario.setRol("programador");
             usuario.setActivo(true);
             usuario.setFotoUrl(urlFoto);
@@ -151,6 +150,7 @@ public class ProgramadorController {
             p.setUsuario(usuario);
             p.setEspecialidad(especialidad);
             p.setDescripcion(descripcion);
+
             p.setEmailContacto(emailContacto);
             p.setGithub(github);
             p.setLinkedin(linkedin);
@@ -158,15 +158,16 @@ public class ProgramadorController {
             p.setWhatsapp(whatsapp);
             p.setDisponibilidadTexto(disponibilidad);
 
-            if (horasJson != null && !horasJson.isEmpty() && !horasJson.equals("undefined")) {
-                List<String> horas = objectMapper.readValue(horasJson, new TypeReference<List<String>>() {
-                });
+            // horasDisponibles
+            if (horasJson != null && !horasJson.isBlank() && !"undefined".equalsIgnoreCase(horasJson)) {
+                List<String> horas = objectMapper.readValue(horasJson, new TypeReference<List<String>>() {});
                 p.setHorasDisponibles(horas);
             } else {
                 p.setHorasDisponibles(Collections.emptyList());
             }
 
-            return ResponseEntity.ok(programadorRepository.save(p));
+            Programador guardado = programadorRepository.save(p);
+            return ResponseEntity.ok(convertirADTO(guardado)); // ✅ devuelve DTO
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -174,7 +175,9 @@ public class ProgramadorController {
         }
     }
 
-    // --- ACTUALIZAR (PUT) ---
+    // -------------------------
+    // PUT (actualizar)
+    // -------------------------
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> actualizarProgramador(
             @PathVariable UUID id,
@@ -188,11 +191,13 @@ public class ProgramadorController {
             @RequestParam(value = "portafolio", required = false) String portafolio,
             @RequestParam(value = "whatsapp", required = false) String whatsapp,
             @RequestParam(value = "disponibilidad", required = false) String disponibilidad,
-            @RequestParam(value = "horasDisponibles", required = false) String horasJson) {
+            @RequestParam(value = "horasDisponibles", required = false) String horasJson
+    ) {
         try {
             Programador p = programadorRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("No existe"));
 
+            // Programador fields
             p.setDescripcion(descripcion);
             p.setEspecialidad(especialidad);
             p.setEmailContacto(emailContacto);
@@ -202,30 +207,40 @@ public class ProgramadorController {
             p.setWhatsapp(whatsapp);
             p.setDisponibilidadTexto(disponibilidad);
 
-            if (horasJson != null && !horasJson.isEmpty() && !horasJson.equals("undefined")) {
-                List<String> horas = objectMapper.readValue(horasJson, new TypeReference<List<String>>() {
-                });
+            if (horasJson != null && !horasJson.isBlank() && !"undefined".equalsIgnoreCase(horasJson)) {
+                List<String> horas = objectMapper.readValue(horasJson, new TypeReference<List<String>>() {});
                 p.setHorasDisponibles(horas);
+            } else if (horasJson != null) {
+                // si mandan explícitamente vacío, puedes decidir limpiar
+                p.setHorasDisponibles(Collections.emptyList());
             }
 
+            // Usuario
             Usuario u = p.getUsuario();
             if (u != null) {
                 u.setNombre(nombre);
+
+                // OJO: si quieres permitir cambiar email/login, aquí NO lo estás haciendo.
+                // u.setEmail(...)
+
                 if (file != null && !file.isEmpty()) {
-                    String nuevaUrl = "https://ui-avatars.com/api/?name=" + nombre;
+                    String nuevaUrl = "https://ui-avatars.com/api/?name=" + nombre.replace(" ", "+");
                     u.setFotoUrl(nuevaUrl);
                 }
                 usuarioRepository.save(u);
             }
 
-            return ResponseEntity.ok(programadorRepository.save(p));
+            Programador guardado = programadorRepository.save(p);
+            return ResponseEntity.ok(convertirADTO(guardado)); // ✅ devuelve DTO
 
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error al editar: " + e.getMessage());
         }
     }
 
-    // --- ELIMINAR (DELETE) ---
+    // -------------------------
+    // DELETE
+    // -------------------------
     @DeleteMapping("/{id}")
     public ResponseEntity<?> eliminarProgramador(@PathVariable UUID id) {
         try {
@@ -234,7 +249,7 @@ public class ProgramadorController {
 
             Usuario u = p.getUsuario();
 
-            // La BD con CASCADE se encarga de los hijos
+            // Si tienes cascade bien configurado, esto borra hijos
             programadorRepository.delete(p);
 
             if (u != null) {
@@ -252,10 +267,15 @@ public class ProgramadorController {
         }
     }
 
-    // --- CONVERSOR DTO ---
+    // -------------------------
+    // DTO CONVERTER (COMPLETO)
+    // -------------------------
     private ProgramadorPublicoDTO convertirADTO(Programador p) {
-        String nombre = (p.getUsuario() != null) ? p.getUsuario().getNombre() : "Sin Nombre";
-        String foto = (p.getUsuario() != null) ? p.getUsuario().getFotoUrl() : null;
+        Usuario u = p.getUsuario();
+
+        String nombre = (u != null && u.getNombre() != null) ? u.getNombre() : "Sin Nombre";
+        String foto = (u != null) ? u.getFotoUrl() : null;
+        UUID usuarioId = (u != null) ? u.getId() : null;
 
         return new ProgramadorPublicoDTO(
                 p.getId(),
@@ -263,8 +283,17 @@ public class ProgramadorController {
                 foto,
                 p.getEspecialidad(),
                 p.getDescripcion(),
+
+                // ✅ campos extra que tu front usa
+                p.getEmailContacto(),
+                p.getWhatsapp(),
+                p.getGithub(),
+                p.getLinkedin(),
+                p.getPortafolio(),
+
                 p.getDisponibilidadTexto(),
                 p.getHorasDisponibles(),
-                p.getUsuario().getId());
+                usuarioId
+        );
     }
 }
